@@ -3,12 +3,19 @@
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Upload, Database, FlaskConical, BarChart3, Settings } from 'lucide-react';
 import { useData } from '../context/DataContext';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function Sidebar() {
   const { cases, apiKey, setApiKey } = useData();
   const [showSettings, setShowSettings] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
+
+  // Update tempKey when apiKey loads from database
+  useEffect(() => {
+    if (apiKey) {
+      setTempKey(apiKey);
+    }
+  }, [apiKey]);
 
   const completeCases = cases.filter(c => c.status === 'complete').length;
   const totalCases = cases.length;
