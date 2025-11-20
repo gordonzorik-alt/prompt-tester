@@ -3,10 +3,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { AuditEntry, CodingPrediction, ModelOption } from '../types';
 
-// Initialize Gemini client
-const getGenAI = () => {
-  // Try localStorage first, then fall back to environment variable
-  const apiKey = localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY;
+// Initialize Gemini client with provided API key
+const getGenAI = (apiKey: string) => {
   if (!apiKey) {
     throw new Error('Gemini API key not found. Please set it in settings.');
   }
@@ -19,9 +17,10 @@ const getGenAI = () => {
 export async function extractAuditFromPDF(
   fileData: ArrayBuffer,
   _fileName: string,
-  model: ModelOption = 'gemini-3-pro-preview'
+  model: ModelOption = 'gemini-3-pro-preview',
+  apiKey: string
 ): Promise<AuditEntry[]> {
-  const genAI = getGenAI();
+  const genAI = getGenAI(apiKey);
   const geminiModel = genAI.getGenerativeModel({ model });
 
   const base64Data = arrayBufferToBase64(fileData);
@@ -79,9 +78,10 @@ export async function extractAuditFromPDF(
  */
 export async function extractTextFromPDF(
   fileData: ArrayBuffer,
-  model: ModelOption = 'gemini-3-pro-preview'
+  model: ModelOption = 'gemini-3-pro-preview',
+  apiKey: string
 ): Promise<string> {
-  const genAI = getGenAI();
+  const genAI = getGenAI(apiKey);
   const geminiModel = genAI.getGenerativeModel({ model });
 
   const base64Data = arrayBufferToBase64(fileData);
@@ -112,9 +112,10 @@ export async function extractTextFromPDF(
 export async function runCodingPrompt(
   noteText: string,
   systemPrompt: string,
-  model: ModelOption = 'gemini-3-pro-preview'
+  model: ModelOption = 'gemini-3-pro-preview',
+  apiKey: string
 ): Promise<CodingPrediction> {
-  const genAI = getGenAI();
+  const genAI = getGenAI(apiKey);
   const geminiModel = genAI.getGenerativeModel({
     model,
     generationConfig: {
@@ -169,6 +170,7 @@ export async function improvePrompt(
     pred_cpts: string[];
   }>,
   model: ModelOption = 'gemini-3-pro-preview',
+  apiKey: string,
   focusCases?: Array<{
     mrn: string;
     rawText: string;
@@ -182,7 +184,7 @@ export async function improvePrompt(
     }>;
   }>
 ): Promise<string> {
-  const genAI = getGenAI();
+  const genAI = getGenAI(apiKey);
   const geminiModel = genAI.getGenerativeModel({ model });
 
   // Analyze patterns in test results

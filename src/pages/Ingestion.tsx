@@ -35,7 +35,7 @@ export default function Ingestion() {
 
     try {
       const buffer = await file.arrayBuffer();
-      const entries = await extractAuditFromPDF(buffer, file.name);
+      const entries = await extractAuditFromPDF(buffer, file.name, 'gemini-3-pro-preview', apiKey);
       const count = ingestAuditEntries(entries, file.name, specialty);
 
       setAuditStatus('success');
@@ -72,7 +72,7 @@ export default function Ingestion() {
 
       try {
         const buffer = await file.arrayBuffer();
-        const text = await extractTextFromPDF(buffer);
+        const text = await extractTextFromPDF(buffer, 'gemini-3-pro-preview', apiKey);
         const mrn = extractMRN(text);
 
         if (mrn) {

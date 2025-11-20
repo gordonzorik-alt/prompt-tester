@@ -113,7 +113,7 @@ export default function PromptTester() {
 
     try {
       const noteText = selectedCase.raw_text || '';
-      const prediction = await runCodingPrompt(noteText, prompt, model);
+      const prediction = await runCodingPrompt(noteText, prompt, model, apiKey);
 
       const gold = selectedCase.ground_truth!;
       const score = calculateScore(gold, prediction);
@@ -197,7 +197,7 @@ export default function PromptTester() {
         }))
       }));
 
-      const improved = await improvePrompt(prompt, testHistory, model, focusCases.length > 0 ? focusCases : undefined);
+      const improved = await improvePrompt(prompt, testHistory, model, apiKey, focusCases.length > 0 ? focusCases : undefined);
       setImprovedPrompt(improved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to improve prompt');
