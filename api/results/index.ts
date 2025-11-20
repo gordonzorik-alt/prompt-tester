@@ -2,7 +2,7 @@
 // POST /api/results - Add a test result
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, initDb } from '../_db';
+import { db, initDb } from '../_db.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Set CORS headers
