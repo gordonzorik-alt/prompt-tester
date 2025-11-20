@@ -1,9 +1,13 @@
 // Database connection helper for Turso
 import { createClient } from '@libsql/client';
 
+if (!process.env.TURSO_DATABASE_URL) {
+  console.error('TURSO_DATABASE_URL is not set');
+}
+
 const db = createClient({
-  url: process.env.TURSO_DATABASE_URL!,
-  authToken: process.env.TURSO_AUTH_TOKEN,
+  url: process.env.TURSO_DATABASE_URL || '',
+  authToken: process.env.TURSO_AUTH_TOKEN || '',
 });
 
 // Initialize tables on first run
