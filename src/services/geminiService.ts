@@ -5,7 +5,8 @@ import type { AuditEntry, CodingPrediction, ModelOption } from '../types';
 
 // Initialize Gemini client
 const getGenAI = () => {
-  const apiKey = localStorage.getItem('gemini_api_key');
+  // Try localStorage first, then fall back to environment variable
+  const apiKey = localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('Gemini API key not found. Please set it in settings.');
   }
@@ -18,7 +19,7 @@ const getGenAI = () => {
 export async function extractAuditFromPDF(
   fileData: ArrayBuffer,
   _fileName: string,
-  model: ModelOption = 'gemini-2.0-flash-exp'
+  model: ModelOption = 'gemini-3-pro-preview'
 ): Promise<AuditEntry[]> {
   const genAI = getGenAI();
   const geminiModel = genAI.getGenerativeModel({ model });
@@ -78,7 +79,7 @@ export async function extractAuditFromPDF(
  */
 export async function extractTextFromPDF(
   fileData: ArrayBuffer,
-  model: ModelOption = 'gemini-2.0-flash-exp'
+  model: ModelOption = 'gemini-3-pro-preview'
 ): Promise<string> {
   const genAI = getGenAI();
   const geminiModel = genAI.getGenerativeModel({ model });
@@ -111,7 +112,7 @@ export async function extractTextFromPDF(
 export async function runCodingPrompt(
   noteText: string,
   systemPrompt: string,
-  model: ModelOption = 'gemini-2.0-flash-exp'
+  model: ModelOption = 'gemini-3-pro-preview'
 ): Promise<CodingPrediction> {
   const genAI = getGenAI();
   const geminiModel = genAI.getGenerativeModel({
@@ -151,6 +152,114 @@ Return your analysis as JSON matching this schema:
   }
 
   return JSON.parse(jsonMatch[0]) as CodingPrediction;
+}
+
+/**
+ * Generate improved prompt based on test results
+ */
+export async function improvePrompt(
+  currentPrompt: string,
+  testHistory: Array<{
+    primary_match: boolean;
+    missed_cpts: string[];
+    hallucinated_cpts: string[];
+    gold_primary: string;
+    pred_primary: string;
+    gold_cpts: string[];
+    pred_cpts: string[];
+  }>,
+  model: ModelOption = 'gemini-3-pro-preview',
+  focusCases?: Array<{
+    mrn: string;
+    rawText: string;
+    groundTruth: any;
+    testResults: Array<{
+      primary_match: boolean;
+      missed_cpts: string[];
+      hallucinated_cpts: string[];
+      gold_primary: string;
+      pred_primary: string;
+    }>;
+  }>
+): Promise<string> {
+  const genAI = getGenAI();
+  const geminiModel = genAI.getGenerativeModel({ model });
+
+  // Analyze patterns in test results
+  const totalTests = testHistory.length;
+  const primaryMatches = testHistory.filter(t => t.primary_match).length;
+  const allMissedCpts = testHistory.flatMap(t => t.missed_cpts);
+  const allHallucinatedCpts = testHistory.flatMap(t => t.hallucinated_cpts);
+
+  // Build focus cases section if provided
+  let focusCasesSection = '';
+  if (focusCases && focusCases.length > 0) {
+    focusCasesSection = `
+## PRIORITY FOCUS CASES
+The user has flagged the following cases as problematic. The improved prompt MUST address the issues with these specific cases.
+
+${focusCases.map((fc, i) => {
+  const latestTest = fc.testResults[0];
+  return `
+### Focus Case ${i + 1} (MRN: ${fc.mrn})
+
+**Ground Truth:**
+- Primary ICD: ${fc.groundTruth?.primary_icd || 'N/A'}
+- CPT Codes: ${fc.groundTruth?.cpt_codes?.join(', ') || 'N/A'}
+
+**Last Test Result:**
+- Predicted Primary: ${latestTest?.pred_primary || 'N/A'} ${latestTest?.primary_match ? '✓' : '✗'}
+- Missed CPTs: ${latestTest?.missed_cpts?.join(', ') || 'None'}
+- Hallucinated CPTs: ${latestTest?.hallucinated_cpts?.join(', ') || 'None'}
+
+**Clinical Note (excerpt):**
+\`\`\`
+${fc.rawText.substring(0, 2000)}${fc.rawText.length > 2000 ? '...[truncated]' : ''}
+\`\`\`
+`;
+}).join('\n')}
+
+IMPORTANT: Analyze WHY the prompt failed on these specific cases and add targeted instructions to address these failures.
+`;
+  }
+
+  const analysisPrompt = `You are a prompt engineering expert specializing in medical coding AI systems.
+
+## Current Prompt
+${currentPrompt}
+
+## Test Results Analysis (${totalTests} tests)
+- Primary ICD Match Rate: ${((primaryMatches / totalTests) * 100).toFixed(1)}%
+- Commonly Missed CPT Codes: ${[...new Set(allMissedCpts)].join(', ') || 'None'}
+- Commonly Hallucinated CPT Codes: ${[...new Set(allHallucinatedCpts)].join(', ') || 'None'}
+
+## Detailed Test Results
+${testHistory.slice(0, 10).map((t, i) => `
+Test ${i + 1}:
+- Gold Primary: ${t.gold_primary} | Predicted: ${t.pred_primary} | ${t.primary_match ? '✓' : '✗'}
+- Gold CPTs: ${t.gold_cpts.join(', ')}
+- Predicted CPTs: ${t.pred_cpts.join(', ')}
+- Missed: ${t.missed_cpts.join(', ') || 'None'}
+- Hallucinated: ${t.hallucinated_cpts.join(', ') || 'None'}
+`).join('\n')}
+${focusCasesSection}
+## Your Task
+Generate an IMPROVED version of the prompt that addresses the patterns of errors WITHOUT overfitting to specific cases.
+
+Guidelines:
+1. If primary ICD matching is low, add clearer instructions about identifying the main reason for encounter
+2. If certain CPT codes are commonly missed, add guidance about those procedure categories
+3. If hallucinations are common, add instructions to only code what's explicitly documented
+4. Keep improvements GENERALIZABLE - don't reference specific codes unless they represent a pattern
+5. Maintain the same output format requirements
+6. Add clarifying instructions where the original prompt was ambiguous
+${focusCases && focusCases.length > 0 ? '7. PAY SPECIAL ATTENTION to the focus cases - understand what went wrong and add specific guidance to prevent those errors' : ''}
+
+Return ONLY the improved prompt text, nothing else.`;
+
+  const result = await geminiModel.generateContent(analysisPrompt);
+  const response = await result.response;
+  return response.text().trim();
 }
 
 /**

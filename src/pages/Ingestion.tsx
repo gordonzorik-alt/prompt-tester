@@ -4,11 +4,13 @@ import { useState, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { extractAuditFromPDF, extractTextFromPDF } from '../services/geminiService';
 import { extractMRN } from '../utils';
+import type { Specialty } from '../types';
 import { Upload, FileText, CheckCircle, AlertCircle, Loader } from 'lucide-react';
 
 export default function Ingestion() {
   const { ingestAuditEntries, ingestRawNote, apiKey } = useData();
 
+  const [specialty, setSpecialty] = useState<Specialty>('Urology');
   const [auditStatus, setAuditStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [auditMessage, setAuditMessage] = useState('');
   const [noteStatus, setNoteStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -34,7 +36,7 @@ export default function Ingestion() {
     try {
       const buffer = await file.arrayBuffer();
       const entries = await extractAuditFromPDF(buffer, file.name);
-      const count = ingestAuditEntries(entries, file.name);
+      const count = ingestAuditEntries(entries, file.name, specialty);
 
       setAuditStatus('success');
       setAuditMessage(`Successfully extracted ${count} audit cases from ${file.name}`);
@@ -111,6 +113,16 @@ export default function Ingestion() {
           <p className="card-description">
             Contains the correct codes from the auditor. This is your "answer key".
           </p>
+
+          <div className="specialty-selector">
+            <label>Specialty:</label>
+            <select value={specialty} onChange={(e) => setSpecialty(e.target.value as Specialty)}>
+              <option value="Urology">Urology</option>
+              <option value="Gastroenterology">Gastroenterology</option>
+              <option value="Cardiology">Cardiology</option>
+              <option value="General">General</option>
+            </select>
+          </div>
 
           <label className="upload-area">
             <input
@@ -243,6 +255,38 @@ export default function Ingestion() {
           color: #64748b;
           font-size: 0.875rem;
           margin: 0 0 16px;
+        }
+
+        .specialty-selector {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+
+        .specialty-selector label {
+          font-weight: 500;
+          color: #1e293b;
+        }
+
+        .specialty-selector select {
+          padding: 8px 12px;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          background: white;
+          font-size: 0.875rem;
+          color: #1e293b;
+          cursor: pointer;
+        }
+
+        .specialty-selector select:hover {
+          border-color: #3b82f6;
+        }
+
+        .specialty-selector select:focus {
+          outline: none;
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         .upload-area {

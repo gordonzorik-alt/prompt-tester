@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { runCodingPrompt } from '../services/geminiService';
+import { runCodingPrompt, improvePrompt } from '../services/geminiService';
 import { calculateScore } from '../utils';
-import type { ModelOption } from '../types';
-import { Play, CheckCircle, XCircle, AlertTriangle, Loader } from 'lucide-react';
+import type { ModelOption, Specialty } from '../types';
+import { Play, CheckCircle, XCircle, AlertTriangle, Loader, Sparkles, Flag } from 'lucide-react';
 
-const DEFAULT_PROMPT = `You are an expert Medical Coder certified in CPT and ICD-10-CM coding.
+const SPECIALTY_PROMPTS: Record<Specialty | 'General', string> = {
+  General: `You are an expert Medical Coder certified in CPT and ICD-10-CM coding.
 
 Analyze the provided medical note and assign the correct codes following CMS guidelines.
 
@@ -17,15 +18,77 @@ Instructions:
 3. Identify all CPT codes for procedures and services performed
 4. Include appropriate modifiers when needed
 
-Provide your reasoning for each code selection.`;
+Provide your reasoning for each code selection.`,
+
+  Urology: `You are an expert Medical Coder specializing in UROLOGY coding, certified in CPT and ICD-10-CM.
+
+Analyze this urology clinical note and assign the correct codes following CMS guidelines.
+
+Key Urology Considerations:
+- Common procedures: cystoscopy (52000), transurethral procedures, prostate procedures
+- Pay attention to approach (transurethral vs open vs laparoscopic)
+- Note laterality for kidney/ureteral procedures (use -50 modifier for bilateral)
+- Distinguish between diagnostic vs therapeutic procedures
+- Watch for commonly bundled services
+
+Instructions:
+1. Identify the PRIMARY diagnosis (the main reason for the encounter)
+2. Identify any SECONDARY diagnoses documented
+3. Identify all CPT codes for urology procedures performed
+4. Include appropriate modifiers (-50 bilateral, -59 distinct procedure, etc.)
+
+Provide your reasoning for each code selection.`,
+
+  Gastroenterology: `You are an expert Medical Coder specializing in GASTROENTEROLOGY coding, certified in CPT and ICD-10-CM.
+
+Analyze this gastroenterology clinical note and assign the correct codes following CMS guidelines.
+
+Key Gastroenterology Considerations:
+- Endoscopy codes: EGD (43235-43259), Colonoscopy (45378-45398)
+- Watch for diagnostic vs therapeutic procedures
+- Biopsy codes - note number and sites
+- Polypectomy techniques affect code selection
+- EGD vs colonoscopy vs both in same session
+
+Instructions:
+1. Identify the PRIMARY diagnosis (the main reason for the encounter)
+2. Identify any SECONDARY diagnoses documented
+3. Identify all CPT codes for GI procedures performed
+4. Include appropriate modifiers (-59 distinct procedure, etc.)
+
+Provide your reasoning for each code selection.`,
+
+  Cardiology: `You are an expert Medical Coder specializing in CARDIOLOGY coding, certified in CPT and ICD-10-CM.
+
+Analyze this cardiology clinical note and assign the correct codes following CMS guidelines.
+
+Key Cardiology Considerations:
+- Cardiac catheterization codes (93451-93572)
+- Echocardiography codes (93303-93355)
+- Stress testing codes
+- Distinguish between diagnostic and interventional procedures
+- Pay attention to professional vs technical components
+- Note supervision levels for stress tests
+
+Instructions:
+1. Identify the PRIMARY diagnosis (the main reason for the encounter)
+2. Identify any SECONDARY diagnoses documented
+3. Identify all CPT codes for cardiology procedures performed
+4. Include appropriate modifiers (-26 professional component, -TC technical, etc.)
+
+Provide your reasoning for each code selection.`
+};
+
+const DEFAULT_PROMPT = SPECIALTY_PROMPTS.General;
 
 export default function PromptTester() {
-  const { getCompleteCases, addTestResult, apiKey } = useData();
+  const { getCompleteCases, addTestResult, testResults, savedPrompts, savePrompt, apiKey, flaggedMrns, getFlaggedCasesWithNotes } = useData();
   const completeCases = getCompleteCases();
 
   const [selectedMRN, setSelectedMRN] = useState<string>(completeCases[0]?.mrn || '');
-  const [model, setModel] = useState<ModelOption>('gemini-2.0-flash-exp');
+  const [model, setModel] = useState<ModelOption>('gemini-3-pro-preview');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [promptName, setPromptName] = useState('Default Prompt');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [result, setResult] = useState<{
     prediction: { primary_icd: string; cpt_codes: string[]; reasoning: string };
@@ -33,6 +96,8 @@ export default function PromptTester() {
     gold: { primary_icd: string; cpt_codes: string[] };
   } | null>(null);
   const [error, setError] = useState('');
+  const [improvingPrompt, setImprovingPrompt] = useState(false);
+  const [improvedPrompt, setImprovedPrompt] = useState<string | null>(null);
 
   const selectedCase = completeCases.find(c => c.mrn === selectedMRN);
 
@@ -70,7 +135,8 @@ export default function PromptTester() {
       addTestResult({
         mrn: selectedCase.mrn,
         model,
-        prompt_name: 'Custom Prompt',
+        prompt_name: promptName,
+        prompt_text: prompt,
         primary_match: score.primary_match,
         cpt_recall: score.cpt_recall,
         missed_cpts: score.missed_cpts,
@@ -82,10 +148,78 @@ export default function PromptTester() {
         reasoning: prediction.reasoning
       });
 
+      // Save prompt for future use
+      savePrompt(promptName, prompt);
+
       setStatus('success');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setStatus('error');
+    }
+  };
+
+  const handleImprovePrompt = async () => {
+    if (testResults.length === 0) {
+      setError('Run some tests first to generate improvement suggestions.');
+      return;
+    }
+
+    setImprovingPrompt(true);
+    setImprovedPrompt(null);
+    setError('');
+
+    try {
+      // Get flagged cases with their clinical notes
+      const flaggedCases = getFlaggedCasesWithNotes();
+
+      // Transform test results to the format expected by improvePrompt
+      const testHistory = testResults.map(r => ({
+        primary_match: r.primary_match,
+        missed_cpts: r.missed_cpts,
+        hallucinated_cpts: r.hallucinated_cpts,
+        gold_primary: r.gold_primary,
+        pred_primary: r.pred_primary,
+        gold_cpts: r.gold_cpts,
+        pred_cpts: r.pred_cpts
+      }));
+
+      // Transform flagged cases to the format expected by improvePrompt
+      const focusCases = flaggedCases.map(fc => ({
+        mrn: fc.mrn,
+        rawText: fc.rawText,
+        groundTruth: fc.groundTruth,
+        testResults: fc.testResults.map(tr => ({
+          primary_match: tr.primary_match,
+          missed_cpts: tr.missed_cpts,
+          hallucinated_cpts: tr.hallucinated_cpts,
+          gold_primary: tr.gold_primary,
+          pred_primary: tr.pred_primary
+        }))
+      }));
+
+      const improved = await improvePrompt(prompt, testHistory, model, focusCases.length > 0 ? focusCases : undefined);
+      setImprovedPrompt(improved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to improve prompt');
+    } finally {
+      setImprovingPrompt(false);
+    }
+  };
+
+  const applyImprovedPrompt = () => {
+    if (improvedPrompt) {
+      // Count existing improved prompts to generate new name
+      const uniqueImproved = new Set(savedPrompts.filter(p => p.name.startsWith('Improved')).map(p => p.name));
+      const version = uniqueImproved.size + 1;
+      const newName = `Improved v${version}`;
+
+      setPrompt(improvedPrompt);
+      setPromptName(newName);
+
+      // Save the improved prompt immediately
+      savePrompt(newName, improvedPrompt);
+
+      setImprovedPrompt(null);
     }
   };
 
@@ -109,18 +243,57 @@ export default function PromptTester() {
               <select value={selectedMRN} onChange={(e) => setSelectedMRN(e.target.value)}>
                 {completeCases.map(c => (
                   <option key={c.mrn} value={c.mrn}>
-                    MRN: {c.mrn} - {c.ground_truth?.primary_icd}
+                    MRN: {c.mrn} - {c.specialty || 'General'} - {c.ground_truth?.primary_icd}
                   </option>
                 ))}
               </select>
             </div>
 
+            {selectedCase?.specialty && (
+              <button
+                className="load-specialty-btn"
+                onClick={() => setPrompt(SPECIALTY_PROMPTS[selectedCase.specialty || 'General'])}
+              >
+                Load {selectedCase.specialty} Prompt
+              </button>
+            )}
+
+            <div className="form-group">
+              <label>Load Saved Prompt</label>
+              <select
+                value=""
+                onChange={(e) => {
+                  const selected = savedPrompts.find(p => p.id === e.target.value);
+                  if (selected) {
+                    setPrompt(selected.text);
+                    setPromptName(selected.name);
+                  }
+                }}
+              >
+                <option value="">{savedPrompts.length === 0 ? 'No saved prompts yet' : 'Select a saved prompt...'}</option>
+                {savedPrompts.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Prompt Name</label>
+              <input
+                type="text"
+                value={promptName}
+                onChange={(e) => setPromptName(e.target.value)}
+                placeholder="Enter a name for this prompt"
+              />
+            </div>
+
             <div className="form-group">
               <label>Model</label>
               <select value={model} onChange={(e) => setModel(e.target.value as ModelOption)}>
+                <option value="gemini-3-pro-preview">Gemini 3 Pro Preview</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                 <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
                 <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
               </select>
             </div>
 
@@ -151,8 +324,37 @@ export default function PromptTester() {
               )}
             </button>
 
+            <button
+              className="improve-btn"
+              onClick={handleImprovePrompt}
+              disabled={improvingPrompt || testResults.length === 0}
+            >
+              {improvingPrompt ? (
+                <>
+                  <Loader className="spin" size={18} />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={18} />
+                  Improve Prompt ({testResults.length} tests)
+                </>
+              )}
+            </button>
+
+            {flaggedMrns.size > 0 && (
+              <div className="flagged-cases-info">
+                <Flag size={14} />
+                <span>{flaggedMrns.size} flagged case{flaggedMrns.size > 1 ? 's' : ''} will be prioritized</span>
+              </div>
+            )}
+
             {!apiKey && (
               <p className="warning">Set your Gemini API key in sidebar settings.</p>
+            )}
+
+            {testResults.length === 0 && (
+              <p className="info-text">Run tests to enable prompt improvement</p>
             )}
 
             {error && (
@@ -161,12 +363,32 @@ export default function PromptTester() {
                 {error}
               </div>
             )}
+
+            {improvedPrompt && (
+              <div className="improved-prompt-section">
+                <h4>Improved Prompt</h4>
+                <div className="improved-prompt-preview">
+                  {improvedPrompt.substring(0, 500)}...
+                </div>
+                <div className="improved-prompt-actions">
+                  <button onClick={applyImprovedPrompt} className="apply-btn">
+                    Apply Improved Prompt
+                  </button>
+                  <button onClick={() => setImprovedPrompt(null)} className="dismiss-btn">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="results-panel">
             {selectedCase && (
               <div className="case-preview">
                 <h3>Case Preview: MRN {selectedCase.mrn}</h3>
+                {selectedCase.specialty && (
+                  <div className="specialty-tag">{selectedCase.specialty}</div>
+                )}
                 <div className="gold-standard">
                   <span className="label">Gold Standard:</span>
                   <span>Primary: {selectedCase.ground_truth?.primary_icd}</span>
@@ -321,12 +543,17 @@ export default function PromptTester() {
         }
 
         .form-group select,
-        .form-group textarea {
+        .form-group textarea,
+        .form-group input[type="text"] {
           width: 100%;
           padding: 10px 12px;
           border: 1px solid #e2e8f0;
           border-radius: 8px;
           font-size: 0.875rem;
+        }
+
+        .form-group input[type="text"] {
+          box-sizing: border-box;
         }
 
         .form-group textarea {
@@ -356,6 +583,129 @@ export default function PromptTester() {
         .run-btn:disabled {
           background: #94a3b8;
           cursor: not-allowed;
+        }
+
+        .load-specialty-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px;
+          background: #f0f9ff;
+          color: #0369a1;
+          border: 1px solid #0369a1;
+          border-radius: 8px;
+          font-weight: 500;
+          cursor: pointer;
+          margin-bottom: 16px;
+        }
+
+        .load-specialty-btn:hover {
+          background: #e0f2fe;
+        }
+
+        .specialty-tag {
+          display: inline-block;
+          padding: 4px 12px;
+          background: #f0f9ff;
+          color: #0369a1;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          margin-bottom: 12px;
+        }
+
+        .improve-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px;
+          background: #8b5cf6;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-weight: 600;
+          cursor: pointer;
+          margin-top: 8px;
+        }
+
+        .improve-btn:hover {
+          background: #7c3aed;
+        }
+
+        .improve-btn:disabled {
+          background: #94a3b8;
+          cursor: not-allowed;
+        }
+
+        .info-text {
+          font-size: 0.75rem;
+          color: #64748b;
+          text-align: center;
+          margin: 8px 0 0;
+        }
+
+        .improved-prompt-section {
+          margin-top: 16px;
+          padding: 16px;
+          background: #f5f3ff;
+          border: 1px solid #8b5cf6;
+          border-radius: 8px;
+        }
+
+        .improved-prompt-section h4 {
+          margin: 0 0 8px;
+          font-size: 0.875rem;
+          color: #7c3aed;
+        }
+
+        .improved-prompt-preview {
+          font-size: 0.75rem;
+          color: #1e293b;
+          background: white;
+          padding: 12px;
+          border-radius: 6px;
+          max-height: 150px;
+          overflow-y: auto;
+          margin-bottom: 12px;
+          font-family: monospace;
+          white-space: pre-wrap;
+        }
+
+        .improved-prompt-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .apply-btn {
+          flex: 1;
+          padding: 8px;
+          background: #8b5cf6;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-weight: 500;
+          cursor: pointer;
+        }
+
+        .apply-btn:hover {
+          background: #7c3aed;
+        }
+
+        .dismiss-btn {
+          padding: 8px 12px;
+          background: transparent;
+          color: #64748b;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+
+        .dismiss-btn:hover {
+          background: #f1f5f9;
         }
 
         .spin {
@@ -539,6 +889,20 @@ export default function PromptTester() {
           margin: 0;
           font-size: 0.875rem;
           color: #1e293b;
+        }
+
+        .flagged-cases-info {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 12px;
+          background: #fef3c7;
+          border: 1px solid #f59e0b;
+          border-radius: 6px;
+          color: #b45309;
+          font-size: 0.75rem;
+          font-weight: 500;
+          margin-top: 8px;
         }
       `}</style>
     </div>

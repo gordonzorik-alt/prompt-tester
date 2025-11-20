@@ -1,7 +1,7 @@
 // Sidebar navigation component
 
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Upload, Database, FlaskConical, Settings } from 'lucide-react';
+import { LayoutDashboard, Upload, Database, FlaskConical, BarChart3, Settings } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useState } from 'react';
 
@@ -17,7 +17,8 @@ export default function Sidebar() {
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/ingestion', icon: Upload, label: 'Data Ingestion' },
     { to: '/cases', icon: Database, label: 'Case Database' },
-    { to: '/tester', icon: FlaskConical, label: 'Prompt Tester' }
+    { to: '/tester', icon: FlaskConical, label: 'Prompt Tester' },
+    { to: '/analytics', icon: BarChart3, label: 'Analytics' }
   ];
 
   const handleSaveKey = () => {

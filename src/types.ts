@@ -7,6 +7,8 @@ export interface GroundTruth {
   auditor_notes: string;
 }
 
+export type Specialty = 'Urology' | 'Gastroenterology' | 'Cardiology' | 'General';
+
 export interface CaseMetadata {
   audit_filename_ref?: string;
   audit_source?: string;
@@ -16,6 +18,7 @@ export interface CaseMetadata {
 export interface MedicalCase {
   mrn: string;
   status: 'complete' | 'incomplete_truth_only' | 'incomplete_note_only';
+  specialty?: Specialty;
   ground_truth?: GroundTruth;
   raw_text?: string;
   metadata?: CaseMetadata;
@@ -27,6 +30,7 @@ export interface TestResult {
   mrn: string;
   model: string;
   prompt_name: string;
+  prompt_text: string;
   primary_match: boolean;
   cpt_recall: number;
   missed_cpts: string[];
@@ -54,4 +58,11 @@ export interface AuditEntry {
   auditor_notes: string;
 }
 
-export type ModelOption = 'gemini-2.0-flash-exp' | 'gemini-1.5-pro' | 'gemini-1.5-flash';
+export type ModelOption = 'gemini-3-pro-preview' | 'gemini-2.5-pro' | 'gemini-2.0-flash-exp' | 'gemini-1.5-pro';
+
+export interface SavedPrompt {
+  id: string;
+  name: string;
+  text: string;
+  createdAt: string;
+}
