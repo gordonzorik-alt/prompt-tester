@@ -90,6 +90,7 @@ export default function Analytics() {
     const mrnStats: Record<string, Record<string, {
       primaryMatch: boolean;
       cptRecall: number;
+      timestamp: string;
     }>> = {};
 
     testResults.forEach(result => {
@@ -97,8 +98,8 @@ export default function Analytics() {
         mrnStats[result.mrn] = {};
       }
       // Keep latest result for each prompt
-      if (!mrnStats[result.mrn][result.prompt_name] ||
-          result.timestamp > mrnStats[result.mrn][result.prompt_name].timestamp) {
+      const existing = mrnStats[result.mrn][result.prompt_name];
+      if (!existing || result.timestamp > existing.timestamp) {
         mrnStats[result.mrn][result.prompt_name] = {
           primaryMatch: result.primary_match,
           cptRecall: result.cpt_recall,
