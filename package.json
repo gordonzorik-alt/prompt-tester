@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@libsql/client": "^0.15.15",
     "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
@@ -27,6 +28,7 @@
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@vercel/node": "^5.5.8",
     "@vitejs/plugin-react": "^5.1.0",
     "concurrently": "^9.2.1",
     "eslint": "^9.39.1",

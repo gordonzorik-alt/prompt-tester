@@ -5,7 +5,8 @@ import type { ReactNode } from 'react';
 import type { MedicalCase, TestResult, GroundTruth, AuditEntry, Specialty, SavedPrompt } from '../types';
 import { generateId, extractMRN } from '../utils';
 
-const API_BASE = 'http://localhost:3009/api';
+// Use relative URL for production (Vercel), absolute for local dev
+const API_BASE = import.meta.env.DEV ? 'http://localhost:3009/api' : '/api';
 
 interface DataContextType {
   // Cases
